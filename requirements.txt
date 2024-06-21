@@ -1,0 +1,5 @@
+numpy
+scipy
+rawpy
+matplotlib
+PIL
