@@ -28,7 +28,7 @@ def show_hist(img, bins=100, log=True):
     if log:
         plt.yscale('log')
     
-def display_rgb(img, scale='norm', clip_sigmas=None):
+def display_rgb(img, scale='norm', clip_sigmas=None, plot=True):
     '''Several display options for intermediate RGB image data.'''
     if clip_sigmas is not None:
         mean = np.mean(np.mean(img,axis=0),axis=0)
@@ -48,9 +48,13 @@ def display_rgb(img, scale='norm', clip_sigmas=None):
             mean = np.mean(np.mean(img,axis=0),axis=0)
             std = np.std(np.std(img,axis=0),axis=0)
         img = (img - mean) / (std * 2.5) + 0.5
-    plt.imshow(np.clip(img,0,1))
+    img = np.clip(img,0,1)
+    if plot:
+        plt.imshow(img)
+    else:
+        return Image.fromarray(np.asarray(255*img,dtype=np.uint8))
 
-def linear_rgb(img, lower_limit=0, upper_limit=1, figsize=[14,7], save=None, **kwargs):
+def linear_rgb(img, lower_limit=0, upper_limit=1, figsize=[14,7], save=None, plot=True, **kwargs):
     '''
     Display and save linear [0,1] RGB data, with simple linear stretching 
     optional to support other ranges.
@@ -60,9 +64,13 @@ def linear_rgb(img, lower_limit=0, upper_limit=1, figsize=[14,7], save=None, **k
         rgb = np.clip(((img-lower_limit)/(upper_limit-lower_limit)),0,1)
     else:
         rgb = img
-    plt.imshow(rgb)
+    pil_img = Image.fromarray(np.asarray(255*rgb,dtype=np.uint8))
     if save:
-        Image.fromarray(np.asarray(255*rgb,dtype=np.uint8)).save(save, **kwargs)
+        pil_img.save(save, **kwargs)
+    if plot:
+        plt.imshow(rgb)
+    else:
+        return pil_img
         
 def draw_constellations(tri,color='k',**kwargs):
     ax = plt.gca()
