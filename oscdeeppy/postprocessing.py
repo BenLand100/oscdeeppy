@@ -38,7 +38,7 @@ def equalize_img(img, sigma_cut=3, get_stats=False):
     m,s = np.median(normd),np.std(normd)
     eqlz = normd - m + sigma_cut*s
     if get_stats:
-        return eqlz,m,s
+        return eqlz,sigma_cut*s,s
     return eqlz
     
 def set_blackpoint_and_norm(rgb, blackpoint=None, auto_blackpoint=1e-3, whitepoint=None, auto_whitepoint=1-1e-5):

@@ -18,6 +18,8 @@
 import numpy as np
 import concurrent.futures as futures
 
+from tqdm import tqdm
+
 def simple_stack(img_set, selection=None, verbose=False, **kwargs):
     '''
     Stacks an iterable caled img_set which is assumed to have the properties 
@@ -58,6 +60,7 @@ def winsor_stack(img_set, winsor_low=0.03, winsor_high=0.03, selection=None, spa
     '''
     if verbose:
         print(f'Computing quantiles [{winsor_low:0.03f}, {1.0-winsor_high:0.03f}] for winsorizing')
+        pbar = tqdm(total=len(img_set), desc='Winsor quantiles')
     low,high = np.empty(img_set.img_shape,dtype=img_set.dtype),np.empty(img_set.img_shape,dtype=img_set.dtype)
     _chunk = _winsor_chunk(img_set,winsor_low,winsor_high)
     with futures.ProcessPoolExecutor(nproc) as pool:
@@ -67,8 +70,8 @@ def winsor_stack(img_set, winsor_low=0.03, winsor_high=0.03, selection=None, spa
                 x_span = span if x_i + span <= img_set.img_shape[1] else img_set.img_shape[1]-x_i
                 y_span = span if y_i + span <= img_set.img_shape[0] else img_set.img_shape[0]-y_i
                 
-                if verbose:
-                    print(f'Submitting chunk ({x_i}, {y_i})')
+                #if verbose:
+                #    print(f'Submitting chunk ({x_i}, {y_i})')
                 
                 f = pool.submit(_chunk, x_i, y_i, x_span, y_span)
                 f_queue.add(f)
@@ -86,7 +89,8 @@ def winsor_stack(img_set, winsor_low=0.03, winsor_high=0.03, selection=None, spa
                             low[res_y_i:res_y_i+res_y_span,res_x_i:res_x_i+res_x_span] = quantiles[0]
                             high[res_y_i:res_y_i+res_y_span,res_x_i:res_x_i+res_x_span] = quantiles[1]
                             if verbose:
-                                print(f'Finished chunk ({res_x_i}, {res_y_i})')
+                                pbar.update(1)
+                                #print(f'Finished chunk ({res_x_i}, {res_y_i})')
                         if all_queued:
                             break
                         else:
@@ -94,16 +98,23 @@ def winsor_stack(img_set, winsor_low=0.03, winsor_high=0.03, selection=None, spa
                             if len(done) == 0:
                                 break 
     if verbose:
+        pbar.close()
         print(f'Stacking images')
+        pbar = tqdm(total=len(img_set), desc='Stacking')
     result = np.zeros(img_set.img_shape, img_set.dtype)
     if selection is None:
         selection = [True]*len(img_set)
     for i, (img,use) in enumerate(zip(img_set,selection)):
         if not use:
             if verbose:
-                print(f'Skipping image {i}')
+                pbar.update(1)
+                #print(f'Skipping image {i}')
             continue
-        if verbose:
-            print(f'Processing image {i}')
+        #if verbose:
+        #    print(f'Processing image {i}')
         result += np.clip(img,low,high)
+        if verbose:
+            pbar.update(1)
+    if verbose:
+        pbar.close()
     return result/np.count_nonzero(selection)

@@ -23,6 +23,8 @@ import numpy as np
 
 import rawpy
 
+from tqdm import tqdm
+
 class RawSet:
     '''
     A collection of raw image files on disk (read-only). This would work for any
@@ -161,6 +163,8 @@ class ImageProcessor:
                 results = [None]*len(input_set)
             else:
                 results = None
+        if verbose:
+            pbar = tqdm(total=len(input_set))
         fs = set()
         args_it = zip(*iter_args) if iter_args else None
         for i in range(len(input_set)):
@@ -168,12 +172,14 @@ class ImageProcessor:
                 in_img = input_set.lazy_read(i)
                 out_img = output_set.lazy_write(i) if output_set is not None else None
                 if verbose:
-                    print(f'Starting {i}')
+                    pass
+                    #print(f'Starting {i}')
                 f = self.pool.submit(_iproc_worker, func, i, in_img, out_img, next(args_it) if args_it else [], args, kwargs)
                 fs.add(f)
             else:
                 if verbose:
-                    print(f'Skipping {i}')
+                    pbar.update(1)
+                    #print(f'Skipping {i}')
             all_queued = i+1 == len(input_set)
             buffer_full = len(fs) >= self.nproc+self.buffer
             if buffer_full or all_queued:
@@ -184,7 +190,8 @@ class ImageProcessor:
                 for f_done in done:
                     i_done, res_done = f_done.result()
                     if verbose:
-                        print(f'Finished {i_done}')
+                        pbar.update(1)
+                        #print(f'Finished {i_done}')
                     if reduce is None:
                         if output_set is None:
                             results[i_done] = res_done
@@ -193,6 +200,8 @@ class ImageProcessor:
                             results = res_done
                         else:
                             results = reduce(results,res_done)
+        if verbose:
+            pbar.close()
         if output_set is None:
             return results
 
