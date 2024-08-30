@@ -18,6 +18,7 @@
 import numpy as np
 
 from scipy.optimize import minimize
+from scipy.spatial.distance import cdist
 
 def huber(f, delta):
     '''
@@ -77,6 +78,79 @@ class Poly2D:
                     continue
                 result += coeff[i,j] * x**i * y**j
         return result
+        
+
+class ThinPlateSpline2D:
+    '''
+    A [thin plate spline](https://en.wikipedia.org/wiki/Thin_plate_spline) 
+    is an optimal way of interpolating data. This is specialized to f(x,y) = z 
+    for the purpose of fitting background gradients, and is implemented using
+    radial basis functions of the form log(r)r^2.
+    '''
+   
+    def __init__(self, ctrl_x=None, ctrl_y=None, values=None, params=None, **kwargs):
+        if values is None:
+            if params is None: # Empty init
+                assert ctrl_x is None, 'ctrl_x argument ignored as no values specified'
+                assert ctrl_y is None, 'ctrl_y argument ignored as no values specified'
+                self.ctrl_x = None
+                self.ctrl_y = None
+                self.params = None
+            else: # pre-fit TPS
+                assert ctrl_x is not None, 'ctrl_x argument required when params specified'
+                assert ctrl_y is not None, 'ctrl_y argument required when params specified'
+                self.ctrl_x = ctrl_x
+                self.ctrl_y = ctrl_y
+                self.params = params
+        else: # expecting a fit
+            assert params is None, 'params argument ignored because values specified'
+            self.fit(ctrl_x, ctrl_y, values, **kwargs)        
+        
+    def fit(self, x, y, z, smoothing=0.0):
+        '''
+        Find the thin plate spline that satisfies f(x,y) = z with an optional
+        smoothing regularization.
+        '''
+        self.ctrl_x = np.asarray(x).ravel()
+        self.ctrl_y = np.asarray(y).ravel()
+        self.ctrl_pts = np.asarray([self.ctrl_x,self.ctrl_y]).T
+        
+        X = np.asarray([self.ctrl_x,self.ctrl_y]).T # (xi,yi) stacked as rows
+        P = np.hstack([np.ones((len(X), 1)), X]) # (1,xi,yi) stacked rows for poly terms
+        R = self._rbf_mat(x,y) + smoothing * np.identity(len(X)) # RBF matrix + regularization
+
+        A = np.vstack([
+            np.hstack([R, P]), 
+            np.hstack([P.T, np.zeros((3,3))])
+        ])
+
+        Y = np.vstack([z.reshape((len(X),1)), np.zeros((3, 1))])
+
+        #Solves A*params = Y
+        self.params = np.linalg.solve(A, Y)
+        
+        return self.params
+    
+    def _rbf(self, r, epsilon=1e-32):
+        result = np.empty_like(r)
+        mask = r > epsilon
+        r_valid = r[mask]
+        result[mask] = np.square(r_valid)*np.log(r_valid)
+        result[~mask] = 0.0
+        return result
+    
+    def _rbf_mat(self, x, y):
+        return self._rbf(cdist(np.asarray([x,y]).T,self.ctrl_pts))
+    
+    def _eval(self, _x, _y):
+        x,y = _x.ravel(), _y.ravel()
+        weights = self.params[:-3]
+        offset,linx,liny = self.params[-3:]
+        result = (self._rbf_mat(x,y) @ weights).squeeze() + x*linx + y*liny + offset
+        return result.reshape(_x.shape)
+    
+    def __call__(self, x, y):
+        return self._eval(x, y)
     
 def fit_background_poly(channel, sample_frac=1e-4, sigma_cut=3, order=3):
     '''
