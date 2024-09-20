@@ -11,9 +11,17 @@ import numpy as np
 from .display import display_rgb
 
 
+class MainWindow:
+
+    def __init__(self):
+        # TK UI
+        self.root = tk.Tk()
+        self.root.title("OSCDeepPy")
+        self.root.bind("q", self.root.quit)
+
 class ImageView:
 
-    def __init__(self, img, scale=None, initial_xy=None, initial_ij=None):
+    def __init__(self, img, scale=None, initial_xy=None, initial_ij=None, root=None):
     
         self.img = img
         self.pil_img = display_rgb(img, plot=False, clip_sigmas=5, scale='linear') 
@@ -29,9 +37,12 @@ class ImageView:
         self.img_offset = np.zeros_like(self.center_px)
         
         # TK UI
-        self.root = tk.Tk()
-        self.root.title("OSCDeepPy")
-        self.root.bind("q", self.quit)
+        if root is None:
+            self.root = tk.Tk()
+            self.root.title("OSCDeepPy")
+            self.root.bind("q", self.root.quit)
+        else:
+            self.root = root
         self.canvas = tk.Canvas(self.root, cursor="tcross")
         self.canvas.config(width=self.canvas_size[1], height=self.canvas_size[0])
         self.canvas.bind("<Button-1>", self.left_click)  # left mouse button
@@ -54,7 +65,8 @@ class ImageView:
         elif initial_ij is not None:
             for y,x in initial_ij:
                 self.add_point_at(x,y) 
-        self.root.mainloop()
+        if root is None:
+            self.root.mainloop()
         
     def get_roi_points(self):
         return np.asarray(list(self.point_map.keys()),dtype=np.int32)
@@ -77,9 +89,6 @@ class ImageView:
         self.mouse_x,self.mouse_y = e.x, e.y
         self.display_image()
         return "break" 
-
-    def quit(self, e):
-        self.root.quit()
 
     def left_click(self, e):
         if not self.points_on:
