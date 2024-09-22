@@ -22,8 +22,35 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 import rawpy
+import fitsio
 
 from tqdm import tqdm
+
+class FITSSet:
+    '''
+    A collection of fits image files on disk (read-only). This would work for any
+    raw type supported by fitsio, but RGGB bayer pattern is assumed in some of the 
+    code. 
+    
+    Images are loaded on the fly, so this is safe across multiprocessing, etc.
+    '''
+    
+    def __init__(self, files):
+        self.files = files
+        self.num_img = len(files)
+        test = fitsio.read(files[0])
+        self.img_shape = test.shape
+        self.dtype = test.dtype
+    
+    def __len__(self):
+        return self.num_img
+    
+    def __getitem__(self, i):
+        assert type(i) == int, 'Must assign to integer values only'
+        return fitsio.read(self.files[i]) 
+        
+    def lazy_read(self, i):
+        return IndirectImg(self,i)
 
 class RawSet:
     '''
@@ -164,22 +191,26 @@ class ImageProcessor:
             else:
                 results = None
         if verbose:
-            pbar = tqdm(total=len(input_set))
+            total_jobs = len(input_set) if selection is None else np.count_nonzero(selection)
+            pbar = tqdm(total=total_jobs)
         fs = set()
         args_it = zip(*iter_args) if iter_args else None
+        j = 0
         for i in range(len(input_set)):
             if selection is None or selection[i]:
                 in_img = input_set.lazy_read(i)
-                out_img = output_set.lazy_write(i) if output_set is not None else None
+                out_img = output_set.lazy_write(j) if output_set is not None else None
                 if verbose:
                     pass
-                    #print(f'Starting {i}')
-                f = self.pool.submit(_iproc_worker, func, i, in_img, out_img, next(args_it) if args_it else [], args, kwargs)
+                    #print(f'Starting {i}->{j}')
+                f = self.pool.submit(_iproc_worker, func, j, in_img, out_img, next(args_it) if args_it else [], args, kwargs)
                 fs.add(f)
+                j = j + 1
             else:
                 if verbose:
-                    pbar.update(1)
+                    pass
                     #print(f'Skipping {i}')
+                next(args_it)
             all_queued = i+1 == len(input_set)
             buffer_full = len(fs) >= self.nproc+self.buffer
             if buffer_full or all_queued:
@@ -188,13 +219,13 @@ class ImageProcessor:
                 else:
                     done,fs = futures.wait(fs,return_when=futures.FIRST_COMPLETED)
                 for f_done in done:
-                    i_done, res_done = f_done.result()
+                    j_done, res_done = f_done.result()
                     if verbose:
                         pbar.update(1)
-                        #print(f'Finished {i_done}')
+                        #print(f'Finished {j_done}')
                     if reduce is None:
                         if output_set is None:
-                            results[i_done] = res_done
+                            results[j_done] = res_done
                     else:
                         if results is None:
                             results = res_done

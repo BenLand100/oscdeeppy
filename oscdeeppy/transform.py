@@ -19,16 +19,15 @@ import numpy as np
 
 from scipy.optimize import minimize
 
-def transform_coords(xy,dx,dy,theta,center=(2000,3000)):
-    center = np.asarray(center)
-    tx = np.asarray([dx,dy])+center
+def transform_coords(xy,dx,dy,theta):
+    tx = np.asarray([dx,dy])
     rot = np.asarray([[np.cos(theta),np.sin(theta)],[-np.sin(theta),np.cos(theta)]])
-    return (rot@(xy-center).T).T+tx
+    return (rot @ xy.T).T + tx
 
 def optimal_transform_fn(ref,other,**kwargs):
     def fn(x):
         tx = transform_coords(ref,*x,**kwargs)
-        return np.sum(np.square(other-tx))
+        return np.mean(np.sqrt(np.sum(np.square(other-tx),axis=1)))
     return fn
     
 def image_transform_chunked(img, tx_fit, span=100, drizzle=True):
@@ -99,13 +98,13 @@ def image_transform_chunked(img, tx_fit, span=100, drizzle=True):
             idx_corner[px_invalid] = [0,0]
             rgb_out[y_i:y_i+y_span,x_i:x_i+x_span] += (bfrac*rfrac*img[idx_corner[:,1],idx_corner[:,0]].T).T.reshape(chunk_shape)
         
-            # set invalid pixels to 0
-            rgb_out[y_i:y_i+y_span,x_i:x_i+x_span][px_invalid.reshape(chunk_shape[:2])] = 0
+            # set invalid pixels to nan
+            rgb_out[y_i:y_i+y_span,x_i:x_i+x_span][px_invalid.reshape(chunk_shape[:2])] = np.nan
     
     return rgb_out.reshape(output_shape)
     
     
-def find_transformation(ref_pts, img_pts, verbose=False, max_iter=10, method='Powell', **kwargs):
+def find_transformation(ref_pts, img_pts, guess_rot=None, guess_tx=None, verbose=False, max_iter=10, method='Powell', **kwargs):
 
     star_mask = np.ones(len(ref_pts),dtype=bool)
     for j in range(max_iter):
@@ -114,9 +113,15 @@ def find_transformation(ref_pts, img_pts, verbose=False, max_iter=10, method='Po
         if len(pts_ref) < 10:
             print('Not enough stars')
             break
+        guess = [0,0,0]
+        if guess_tx is not None:
+            guess[0] = guess_tx[0]
+            guess[1] = guess_tx[1]
+        if guess_rot is not None:
+            guess[2] = guess_rot
         tx_fit = minimize(
             optimal_transform_fn(pts_ref,pts_other), 
-            (0,0,0), method=method, **kwargs
+            guess, method=method, **kwargs
         )
         pts_ref_tx = transform_coords(pts_ref,*tx_fit.x)
         star_dists = np.sqrt(np.sum(np.square(pts_ref_tx - pts_other),axis=1))

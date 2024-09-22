@@ -30,11 +30,12 @@ def simple_stack(img_set, selection=None, verbose=False, **kwargs):
     these requirements.
     '''
     if selection is None:
-        return np.mean(img_set, axis=0, **kwargs)
+        return np.nanmean(img_set, axis=0, **kwargs)
     else:
-        return np.mean((img for img,use in zip(img_set,selection) if use), axis=0, **kwargs)
+        return np.nanmean((img for img,use in zip(img_set,selection) if use), axis=0, **kwargs)
         
-        
+  
+# TODO: the _chunk worker and job handling in the winsor_stack should be made generic 
 class _winsor_chunk:
     '''
     Helper class for winsor_stack to wrap a unit of work processing one chun for multiprocessing.
@@ -46,11 +47,29 @@ class _winsor_chunk:
         self.winsor_high = winsor_high
         
     def __call__(self, x_i, y_i, x_span, y_span):
-        img_slice = np.asarray([img[y_i:y_i+y_span,x_i:x_i+x_span] for img in self.img_set])
-        quantiles = np.quantile(img_slice,[self.winsor_low,1.0-self.winsor_high],axis=0)
-        return (x_i, y_i, x_span, y_span),quantiles
+        patches = np.asarray([img[y_i:y_i+y_span,x_i:x_i+x_span] for img in self.img_set])
+        
+        # HELP: nanquantile sucks, it's several hundred times slower than quantile
+        # quantiles = np.nanquantile(img_slice,[self.winsor_low,1.0-self.winsor_high],axis=0)
+        # The rest is a workaround for nanquantile being awful. 
+        # Only real hope is to replace the nans and use quantile or reimplement it in native code
+        # I'll replace nan with median values and approximately assume they're rare enough not to matter
+        # Fortunately nanmedian doesn't suck as much as nanquantile! It is still anomously slower than median
+        patch_median = np.nanmedian(patches, axis=0)
+        nanless_patches = np.copy(patches)
+        for p in nanless_patches:
+            m = np.isnan(p)
+            p[m] = patch_median[m]
+        low,high = np.quantile(nanless_patches,[self.winsor_low,1.0-self.winsor_high],axis=0)
+        nanless_patches = None
+        
+        # Winsorize and stack, keeping track of missing data
+        counts = np.sum(np.asarray(~np.isnan(patches), dtype=self.img_set.dtype), axis=0)
+        summed = np.sum(np.nan_to_num(np.clip(patches, low, high)), axis=0)
+        
+        return (x_i, y_i, x_span, y_span),counts,summed
 
-def winsor_stack(img_set, winsor_low=0.03, winsor_high=0.03, selection=None, span = 1000, nproc=4, verbose=False):
+def winsor_stack(img_set, winsor_low=0.03, winsor_high=0.03, span = 1000, nproc=4, verbose=False, return_counts=True):
     '''
     Similar to simple_stack, but Winsorizes the pixel data to clip outliers 
     to the quantile specified by winsor_high and windsor_low.
@@ -59,9 +78,11 @@ def winsor_stack(img_set, winsor_low=0.03, winsor_high=0.03, selection=None, spa
     Chunk size is controlled by span, and multiprocessing can be tuned with nproc workers.
     '''
     if verbose:
-        print(f'Computing quantiles [{winsor_low:0.03f}, {1.0-winsor_high:0.03f}] for winsorizing')
-        pbar = tqdm(total=len(img_set), desc='Winsor quantiles')
-    low,high = np.empty(img_set.img_shape,dtype=img_set.dtype),np.empty(img_set.img_shape,dtype=img_set.dtype)
+        print(f'Stacking with winzor quantiles [{winsor_low:0.03f}, {1.0-winsor_high:0.03f}]')
+        total_jobs = np.prod([(1 if s%span != 0 else 0) + s//span for s in img_set.img_shape[:2]])
+        print(f'Total jobs to run: {total_jobs}')
+        pbar = tqdm(total=total_jobs, desc='Winsor quantiles')
+    summed,counts = np.empty(img_set.img_shape,dtype=img_set.dtype),np.empty(img_set.img_shape,dtype=img_set.dtype)
     _chunk = _winsor_chunk(img_set,winsor_low,winsor_high)
     with futures.ProcessPoolExecutor(nproc) as pool:
         f_queue = set()
@@ -85,9 +106,9 @@ def winsor_stack(img_set, winsor_low=0.03, winsor_high=0.03, selection=None, spa
                         done,f_queue = futures.wait(f_queue,return_when=futures.FIRST_COMPLETED)
                     while True:
                         for f_done in done:
-                            (res_x_i, res_y_i, res_x_span, res_y_span),quantiles = f_done.result()
-                            low[res_y_i:res_y_i+res_y_span,res_x_i:res_x_i+res_x_span] = quantiles[0]
-                            high[res_y_i:res_y_i+res_y_span,res_x_i:res_x_i+res_x_span] = quantiles[1]
+                            (res_x_i, res_y_i, res_x_span, res_y_span),_counts,_summed = f_done.result()
+                            counts[res_y_i:res_y_i+res_y_span,res_x_i:res_x_i+res_x_span] = _counts
+                            summed[res_y_i:res_y_i+res_y_span,res_x_i:res_x_i+res_x_span] = _summed
                             if verbose:
                                 pbar.update(1)
                                 #print(f'Finished chunk ({res_x_i}, {res_y_i})')
@@ -99,22 +120,4 @@ def winsor_stack(img_set, winsor_low=0.03, winsor_high=0.03, selection=None, spa
                                 break 
     if verbose:
         pbar.close()
-        print(f'Stacking images')
-        pbar = tqdm(total=len(img_set), desc='Stacking')
-    result = np.zeros(img_set.img_shape, img_set.dtype)
-    if selection is None:
-        selection = [True]*len(img_set)
-    for i, (img,use) in enumerate(zip(img_set,selection)):
-        if not use:
-            if verbose:
-                pbar.update(1)
-                #print(f'Skipping image {i}')
-            continue
-        #if verbose:
-        #    print(f'Processing image {i}')
-        result += np.clip(img,low,high)
-        if verbose:
-            pbar.update(1)
-    if verbose:
-        pbar.close()
-    return result/np.count_nonzero(selection)
+    return summed/counts if not return_counts else (summed,counts)

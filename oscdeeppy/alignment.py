@@ -22,6 +22,8 @@ import matplotlib.pyplot as plt
 from scipy.spatial import KDTree
 from scipy.ndimage import gaussian_filter
 from scipy.optimize import minimize
+
+from .transform import transform_coords
     
 class TriHash:
     '''This represents a geometrically hashable triangle, such that triangles of 
@@ -194,33 +196,37 @@ def find_corresponding_constellations(tri_a,tri_b,fwhm=5,verbose=False):
             j = matches[0]
             a = tri_a[i]
             b = tri_b[j]
-            p = np.sqrt(np.sum(np.square(a.abc[0] - b.abc[0]))) 
-            q = np.sqrt(np.sum(np.square(a.abc[1] - b.abc[1])))
-            r = np.sqrt(np.sum(np.square(a.abc[2] - b.abc[2])))
-            #if verbose:
-            #    print(p+q+r,a,b)
             tri_a_match.append(a)
             tri_b_match.append(b)
-            dists.append(p+q+r)
-            
-    median = np.median(dists)
-    dists = np.asarray(dists)
-    tri_a_match = np.asarray(tri_a_match)
-    tri_b_match = np.asarray(tri_b_match)
-    mask = (dists > median/2) & (dists < median*2)
-    if verbose:
-        print('Median:',median,'Passing:',np.count_nonzero(mask))
-        plt.hist(dists[mask],bins=100)
-    tri_pair_a = tri_a_match[mask]
-    tri_pair_b = tri_b_match[mask]
     
-    return tri_pair_a, tri_pair_b
+    return tri_a_match, tri_b_match
 
-def find_corresponding_points(tri_pair_a, tri_pair_b):
+tvec = lambda tri : tri.abc[0] - np.mean(tri.abc,axis=0)
+norm = lambda x : x / np.sqrt(np.sum(np.square(x)))
+dvec = lambda tri : norm(tvec(tri))
+angle = lambda tri : np.atan2((dv:=dvec(tri))[1],dv[1])
+mean_of_angles = lambda a : np.atan2(np.sum(np.sin(a)), np.sum(np.cos(a)))
+stdev_of_angles = lambda a : np.sqrt(-2.0*np.log(np.mean(np.sqrt(np.square(np.sin(a))+np.square(np.cos(a))))))
+
+def find_corresponding_points(tri_pair_a, tri_pair_b, angle_tol=5/180*np.pi):
+    angle_diff = np.asarray([np.mod(angle(ta)-angle(tb), 2.0*np.pi) for ta,tb in zip(tri_pair_a,tri_pair_b)])
+    mean_rot = mean_of_angles(angle_diff)
+    mask = np.abs(angle_diff - mean_rot) <= angle_tol
+    
+    tri_pair_a = [x for x,y in zip(tri_pair_a,mask) if y]
+    tri_pair_b = [x for x,y in zip(tri_pair_b,mask) if y]
+    
+    angle_diff = np.asarray([np.mod(angle(ta)-angle(tb), 2.0*np.pi) for ta,tb in zip(tri_pair_a,tri_pair_b)])
+    mean_rot = mean_of_angles(angle_diff)
+    
     corr_a = np.concatenate([t.abc for t in tri_pair_a])
     corr_b = np.concatenate([t.abc for t in tri_pair_b])
+    
+    rot_corr_b = transform_coords(corr_b, 0.0, 0.0, mean_rot)
+    mean_tx = np.mean(corr_a - rot_corr_b, axis=0) # TODO filter again?
+    
     corr_a, idx = np.unique(corr_a, axis=0, return_index=True)
     corr_b = corr_b[idx]
     corr_b, idx = np.unique(corr_b, axis=0, return_index=True)
     corr_a = corr_a[idx] 
-    return corr_a, corr_b
+    return corr_a, corr_b, mean_rot, mean_tx
