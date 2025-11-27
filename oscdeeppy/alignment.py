@@ -75,9 +75,10 @@ def gauss_residual_fn(X,Y,Z):
         Z_fit = gauss_profile(X,Y,*x)
         return np.sum(np.square(Z-Z_fit))
     return fn
-    
+
 def find_stars(img, registration_channel=1, num_stars=250, patch_radius=10, verbose=False, 
-               snr_min=10, max_peak_dist=2, min_fwhm=2, max_eccentricity=0.85, clip_cut=None):
+               snr_min=10, max_peak_dist=2, min_fwhm=2, max_eccentricity=0.85, clip_cut=None,
+               max_attempts=2000):
     reg_ch = img[...,registration_channel] if registration_channel else img #None -> grayscale
     mean = np.mean(reg_ch)
     std = np.std(reg_ch)
@@ -93,6 +94,7 @@ def find_stars(img, registration_channel=1, num_stars=250, patch_radius=10, verb
         
     reg_search = reg_blur.copy()
 
+    attempts = 0
     candidate_stars = []
 
     i = 0
@@ -100,8 +102,8 @@ def find_stars(img, registration_channel=1, num_stars=250, patch_radius=10, verb
         idx = np.argmax(reg_search)
         x_max = idx%reg_search.shape[1]
         y_max = idx//reg_search.shape[1]
-        if reg_search[y_max,x_max] <= 0.0:
-            print('Could not find enough stars!')
+        if attempts >= max_attempts or reg_search[y_max,x_max] <= 0.0:
+            print(f'Only {i} of {num_stars} requested stars from {attempts} attempts')
             break
         #print(x_max,y_max,reg_search[y_max,x_max])
 
@@ -128,6 +130,8 @@ def find_stars(img, registration_channel=1, num_stars=250, patch_radius=10, verb
                 (x_max,y_max,2,2,0,np.max(patch),np.mean(patch)), 
                 method='Powell'
             )
+
+            attempts += 1
 
             mean_x, mean_y, sig_x, sig_y, theta, star_lvl, bkg_lvl = fit.x
             sig_x,sig_y = abs(sig_x),abs(sig_y)
@@ -162,7 +166,7 @@ def find_stars(img, registration_channel=1, num_stars=250, patch_radius=10, verb
                     plt.close()
             else:
                 if verbose:
-                    print('Candidate Excluded')
+                    print(f'Candidate {attempts} Excluded')
         else: #hit an edge
             reg_search[
                 max(y_max-patch_radius,0):min(y_max+patch_radius+1,reg_search.shape[0]),
@@ -170,7 +174,7 @@ def find_stars(img, registration_channel=1, num_stars=250, patch_radius=10, verb
             ] = 0
 
     return np.asarray(candidate_stars)
-    
+
 def build_constellations(stars, k_nearest=7, **kwargs):
     pts = stars[:,:2]
     kdpts = KDTree(pts)
