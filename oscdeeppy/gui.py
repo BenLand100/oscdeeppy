@@ -21,20 +21,12 @@ class MainWindow:
 
 class ImageView:
 
-    def __init__(self, img, scale=None, initial_xy=None, initial_ij=None, root=None):
-    
-        self.img = img
-        self.pil_img = display_rgb(img, plot=False, clip_sigmas=5, scale='linear') 
+    def __init__(self, img=None, scale=None, roi_selection=False, initial_xy=None, initial_ij=None, root=None):
         
-        self.img_size = np.asarray(self.img.shape[:2], np.float64)
-        if scale is None:
-            self.scale = 1500/self.img_size[1]  
-        else:
-            self.scale = scale
-        self.canvas_size = self.img_size*self.scale
-        self.center_cv = self.canvas_size / 2
-        self.center_px = np.asarray(img.shape[:2], np.float64)/2
-        self.img_offset = np.zeros_like(self.center_px)
+        self.scale = scale
+        self.img_size = np.asarray([np.nan,np.nan])
+        if img is not None:
+            self.load_data(img)
         
         # TK UI
         if root is None:
@@ -55,7 +47,7 @@ class ImageView:
         self.canvas.pack()
         
         self.point_map = {}
-        self.points_on = True
+        self.points_on = False
         
         self.display_image()
         if initial_xy is not None:
@@ -67,6 +59,39 @@ class ImageView:
                 self.add_point_at(x,y) 
         if root is None:
             self.root.mainloop()
+            
+    def load_data(self, data, view='sigma', **kwargs):
+        data = data.squeeze()
+        if len(data.shape) == 2:
+            self.mono = True
+            data = np.dstack([data,data,data]) #sue me
+        elif len(data.shape) == 3:
+            self.mono = False
+        img_size = data.shape[:2]
+        if not np.allclose(img_size,self.img_size):
+            self.img_size = np.asarray(img_size[:2], np.float64)
+            if self.scale is None:
+                self.scale = 1500 / self.img_size[1]
+            self.canvas_size = self.img_size*self.scale
+            self.center_cv = self.canvas_size / 2
+            self.center_px = np.asarray(self.img_size[:2], np.float64) / 2
+            self.img_offset = np.zeros_like(self.center_px)
+        if view is None or view == 'none':
+            self.pil_img = display_rgb(data, plot=False, scale=None) 
+        if view == 'linear' or view == 'minmax':
+            self.pil_img = display_rgb(data, plot=False, scale='linear') 
+        elif view == 'sigma':
+            self.pil_img = display_rgb(data, plot=False, clip_sigmas=5, scale='linear') 
+        elif view == 'auto':
+            self.pil_img = display_rgb(data, plot=False, scale='auto') 
+        elif view == 'norm':
+            self.pil_img = display_rgb(data, plot=False, scale='norm') 
+        elif view == 'histogram':
+            raise Exception('not implemented')
+        
+    def clear_roi_points(self):
+        self.point_map = {}
+        self.tmp_points = []
         
     def get_roi_points(self):
         return np.asarray(list(self.point_map.keys()),dtype=np.int32)
@@ -148,17 +173,17 @@ class ImageView:
         crop = self.pil_img.crop((
             max(0,int(left_px)),
             max(0,int(upper_px)),
-            min(self.img.shape[1]-1,int(right_px)),
-            min(self.img.shape[0]-1,int(bottom_px))
+            min(self.img_size[1]-1,int(right_px)),
+            min(self.img_size[0]-1,int(bottom_px))
         ))
         
         yoff_cv = -upper_px*self.scale if int(upper_px) < 0 else 0
-        ypad_cv = (bottom_px - self.img.shape[0])*self.scale if int(bottom_px) >=  self.img.shape[0] else 0
+        ypad_cv = (bottom_px - self.img_size[0])*self.scale if int(bottom_px) >=  self.img_size[0] else 0
         xoff_cv = -left_px*self.scale if int(left_px) < 0 else 0
-        xpad_cv = (right_px - self.img.shape[1])*self.scale if int(right_px) >=  self.img.shape[1] else 0
+        xpad_cv = (right_px - self.img_size[1])*self.scale if int(right_px) >=  self.img_size[1] else 0
         
         scale_to = (int(self.canvas_size[1] - xoff_cv - xpad_cv), int(self.canvas_size[0] - yoff_cv - ypad_cv))
-        img = crop.resize(scale_to)
+        img = crop.resize(scale_to, resample=Image.Resampling.BOX)
         self.tk_img = ImageTk.PhotoImage(img, master=self.canvas)
         self.canvas.create_image(xoff_cv, yoff_cv, image=self.tk_img, anchor=tk.NW)
         self.tmp_points = []

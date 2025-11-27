@@ -17,16 +17,30 @@
 
 import numpy as np
 
-def debayer_simple(filter_img):
+def debayer_simple(filter_img, channels=False):
     '''
     The 'super pixel' algorithm that halves the image resolution
     '''
     R = filter_img[0::2,0::2]
     G1 = filter_img[0::2,1::2]
     G2 = filter_img[1::2,0::2]
-    G = (G1+G2)/2
     B = filter_img[1::2,1::2]
-    return np.asarray([R,G,B]).transpose(1,2,0)
+    if channels:
+        return R,G1,G2,B
+    else:
+        G = (G1+G2)/2
+        return np.asarray([R,G,B]).transpose(1,2,0)
+
+def rebayer_simple(R, G1, G2, B):
+    '''
+    Can recreate a monochrome image passed to debayer_simple with channels=True
+    '''   
+    filter_img = np.empty(shape=(R.shape[0]*2,R.shape[1]*2), dtype=R.dtype)
+    filter_img[0::2,0::2] = R
+    filter_img[0::2,1::2] = G1
+    filter_img[1::2,0::2] = G2
+    filter_img[1::2,1::2] = B
+    return filter_img
 
 def debayer_full(filter_img, dtype=None):
     '''

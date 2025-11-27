@@ -28,7 +28,7 @@ def show_hist(img, bins=100, log=True):
     if log:
         plt.yscale('log')
     
-def display_rgb(img, scale='norm', clip_sigmas=None, plot=True):
+def display_rgb(img, scale='norm', clip_sigmas=None, plot=True, auto_sigma=2.5, auto_offset=0.1):
     '''Several display options for intermediate RGB image data.'''
     if clip_sigmas is not None:
         mean = np.mean(np.mean(img,axis=0),axis=0)
@@ -39,7 +39,7 @@ def display_rgb(img, scale='norm', clip_sigmas=None, plot=True):
     elif scale == 'norm':
         levels = np.max(np.max(img,axis=0),axis=0)
         img = img / levels
-    elif scale == 'linear':
+    elif scale == 'linear' or scale == 'minmax':
         levels = np.max(np.max(img,axis=0),axis=0)
         floors = np.min(np.min(img,axis=0),axis=0)
         img = (img - floors) / (levels-floors)
@@ -47,10 +47,10 @@ def display_rgb(img, scale='norm', clip_sigmas=None, plot=True):
         if clip_sigmas is None:
             mean = np.mean(np.mean(img,axis=0),axis=0)
             std = np.std(np.std(img,axis=0),axis=0)
-        img = (img - mean) / (std * 2.5) + 0.5
+        img = (img - mean) / (std * auto_sigma) + auto_offset
     img = np.clip(img,0,1)
     if plot:
-        plt.imshow(img)
+        plt.imshow(img, cmap='gray')
     else:
         return Image.fromarray(np.asarray(255*img,dtype=np.uint8))
 
@@ -68,7 +68,7 @@ def linear_rgb(img, lower_limit=0, upper_limit=1, figsize=[14,7], save=None, plo
     if save:
         pil_img.save(save, **kwargs)
     if plot:
-        plt.imshow(rgb)
+        plt.imshow(rgb, cmap='gray')
     else:
         return pil_img
         

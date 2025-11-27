@@ -30,7 +30,7 @@ def optimal_transform_fn(ref,other,**kwargs):
         return np.mean(np.sqrt(np.sum(np.square(other-tx),axis=1)))
     return fn
     
-def image_transform_chunked(img, tx_fit, span=100, drizzle=True):
+def image_transform_chunked(img, tx_fit, span=100, drizzle=False):
     '''
     tx_fit describes a coordinate transformation that maps a reference coordinate space 
     onto the pixel coordinate space of another image, offset by position and rotation.
