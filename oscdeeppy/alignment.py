@@ -77,10 +77,11 @@ def gauss_residual_fn(X,Y,Z):
     return fn
     
 def find_stars(img, registration_channel=1, num_stars=250, patch_radius=10, verbose=False, 
-               snr_min=10, max_peak_dist=2, min_fwhm=2, max_eccentricity=0.85):
-    reg_ch = img[...,registration_channel]
+               snr_min=10, max_peak_dist=2, min_fwhm=2, max_eccentricity=0.85, clip_cut=None):
+    reg_ch = img[...,registration_channel] if registration_channel else img #None -> grayscale
     mean = np.mean(reg_ch)
     std = np.std(reg_ch)
+    ch_max = np.max(reg_ch)
 
     reg_mask = np.zeros_like(reg_ch)
     shift = reg_ch-mean
@@ -111,8 +112,11 @@ def find_stars(img, registration_channel=1, num_stars=250, patch_radius=10, verb
             ] = 0 # zero out candidate region to skip in the future
 
             patch = reg_ch[(y_max-patch_radius):(y_max+patch_radius+1),(x_max-patch_radius):(x_max+patch_radius+1)]
-            if np.max(patch)/np.min(patch) < snr_min:
+            patch_max = np.max(patch)
+            if patch_max/np.min(patch[patch>0]) < snr_min:
                 continue # skip candidate as SNR too low to make the cut
+            if clip_cut and patch_max > ch_max*clip_cut:
+                continue # skip because there's clipping
                 
             y = np.arange(y_max-patch_radius,y_max+patch_radius+1)
             x = np.arange(x_max-patch_radius,x_max+patch_radius+1)
@@ -140,7 +144,8 @@ def find_stars(img, registration_channel=1, num_stars=250, patch_radius=10, verb
                 fwhm > min_fwhm and 
                 eccentricity < max_eccentricity and 
                 star_lvl > bkg_lvl and 
-                abs(star_lvl/bkg_lvl) > snr_min
+                abs(star_lvl/bkg_lvl) > snr_min and
+                (clip_cut is None or star_lvl <= clip_cut*ch_max)
                ):
                 
                 candidate_stars.append([mean_x, mean_y, fwhm, star_lvl, bkg_lvl, eccentricity])

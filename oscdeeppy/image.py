@@ -210,7 +210,8 @@ class ImageProcessor:
                 if verbose:
                     pass
                     #print(f'Skipping {i}')
-                next(args_it)
+                if args_it:
+                    next(args_it)
             all_queued = i+1 == len(input_set)
             buffer_full = len(fs) >= self.nproc+self.buffer
             if buffer_full or all_queued:

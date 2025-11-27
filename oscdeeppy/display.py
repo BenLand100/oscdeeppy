@@ -28,6 +28,7 @@ def show_hist(img, bins=100, log=True):
     if log:
         plt.yscale('log')
     
+#Deprecated
 def display_rgb(img, scale='norm', clip_sigmas=None, plot=True, auto_sigma=2.5, auto_offset=0.1):
     '''Several display options for intermediate RGB image data.'''
     if clip_sigmas is not None:
@@ -54,6 +55,7 @@ def display_rgb(img, scale='norm', clip_sigmas=None, plot=True, auto_sigma=2.5, 
     else:
         return Image.fromarray(np.asarray(255*img,dtype=np.uint8))
 
+#Deprecated
 def linear_rgb(img, lower_limit=0, upper_limit=1, figsize=[14,7], save=None, plot=True, **kwargs):
     '''
     Display and save linear [0,1] RGB data, with simple linear stretching 
@@ -69,6 +71,23 @@ def linear_rgb(img, lower_limit=0, upper_limit=1, figsize=[14,7], save=None, plo
         pil_img.save(save, **kwargs)
     if plot:
         plt.imshow(rgb, cmap='gray')
+    else:
+        return pil_img
+
+def display_stf(img, blackpoint=0.01, whitepoint=1-1e-5, symmetry_sigma=0.02, stretch_factor=5, save=None, plot=True, show=True, **kwargs):
+    '''Performs a GHS stretch on data normalized to a blackpoint and whitepoint by quantile.'''
+    blackpoint,whitepoint = np.quantile(img,[blackpoint,whitepoint])
+    med,std = np.median(img),np.std(img)
+    img = np.clip(img, blackpoint, whitepoint)
+    stretched = odp.ghs(img, low_point=blackpoint, high_point=whitepoint, symmetry_point=med+std*symmetry_sigma, stretch_factor=stretch_factor)
+    pil_img = Image.fromarray(np.asarray(255*stretched,dtype=np.uint8))
+    if save:
+        pil_img.save(save, **kwargs)
+    if plot:
+        plt.imshow(stretched, cmap='gray')
+        if show:
+            plt.show()
+            plt.close()
     else:
         return pil_img
         
