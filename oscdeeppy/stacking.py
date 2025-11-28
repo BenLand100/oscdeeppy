@@ -18,7 +18,7 @@
 import numpy as np
 import concurrent.futures as futures
 
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 def simple_stack(img_set, selection=None, verbose=False, **kwargs):
     '''

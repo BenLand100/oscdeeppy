@@ -18,6 +18,8 @@
 import matplotlib.pyplot as plt
 import numpy as np
 
+from .postprocessing import ghs
+
 from PIL import Image
 
 def show_hist(img, bins=100, log=True):
@@ -79,7 +81,7 @@ def display_stf(img, blackpoint=0.01, whitepoint=1-1e-5, symmetry_sigma=0.02, st
     blackpoint,whitepoint = np.quantile(img,[blackpoint,whitepoint])
     med,std = np.median(img),np.std(img)
     img = np.clip(img, blackpoint, whitepoint)
-    stretched = odp.ghs(img, low_point=blackpoint, high_point=whitepoint, symmetry_point=med+std*symmetry_sigma, stretch_factor=stretch_factor)
+    stretched = ghs(img, low_point=blackpoint, high_point=whitepoint, symmetry_point=med+std*symmetry_sigma, stretch_factor=stretch_factor)
     pil_img = Image.fromarray(np.asarray(255*stretched,dtype=np.uint8))
     if save:
         pil_img.save(save, **kwargs)

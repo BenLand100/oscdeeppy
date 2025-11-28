@@ -24,7 +24,7 @@ import numpy as np
 import rawpy
 import fitsio
 
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 class FITSSet:
     '''
