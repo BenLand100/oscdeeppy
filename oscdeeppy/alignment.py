@@ -65,8 +65,9 @@ class TriHash:
 def gauss_profile(X, Y, mean_x, mean_y, sig_x, sig_y, theta, A, B):
     X_off = X-mean_x
     Y_off = Y-mean_y
-    X_rot = (X_off*np.cos(theta) - Y_off*np.sin(theta))
-    Y_rot = (Y_off*np.cos(theta) + X_off*np.sin(theta))
+    sin,cos = np.sin(theta),np.cos(theta)
+    X_rot = (X_off*cos - Y_off*sin)
+    Y_rot = (Y_off*cos + X_off*sin)
     
     return A*np.exp(-np.square(X_rot/sig_x)/2-np.square(Y_rot/sig_y)/2)+B
 
@@ -79,6 +80,13 @@ def gauss_residual_fn(X,Y,Z):
 def find_stars(img, registration_channel=1, num_stars=250, patch_radius=10, verbose=False, 
                snr_min=10, max_peak_dist=2, min_fwhm=2, max_eccentricity=0.85, clip_cut=None,
                max_attempts=2000):
+    '''
+    Identify stars by looking for relatively isolated bright peaks and fitting 2d gaussian profiles.
+    Handles multi-channel images by extracting one channel, working natively on a grayscale image/
+    Success parameters are defined as keyword arguments to adjust the identified population,
+    along with a total number of stars to identify and maximum number of candidates to consider.
+    This can also create point spread functions from the identified stars.
+    '''
     reg_ch = img[...,registration_channel] if registration_channel else img #None -> grayscale
     mean = np.mean(reg_ch)
     std = np.std(reg_ch)
@@ -114,8 +122,10 @@ def find_stars(img, registration_channel=1, num_stars=250, patch_radius=10, verb
             ] = 0 # zero out candidate region to skip in the future
 
             patch = reg_ch[(y_max-patch_radius):(y_max+patch_radius+1),(x_max-patch_radius):(x_max+patch_radius+1)]
-            patch_max = np.max(patch)
-            if patch_max/np.min(patch[patch>0]) < snr_min:
+            valid = np.logical_and(~np.isnan(patch), patch > 0)
+            patch_valid = patch[valid]
+            patch_max = np.max(patch_valid)
+            if patch_max/np.min(patch_valid) < snr_min:
                 continue # skip candidate as SNR too low to make the cut
             if clip_cut and patch_max > ch_max*clip_cut:
                 continue # skip because there's clipping
@@ -126,8 +136,8 @@ def find_stars(img, registration_channel=1, num_stars=250, patch_radius=10, verb
             
             # fit the star profile
             fit = minimize(
-                gauss_residual_fn(x,y,patch), 
-                (x_max,y_max,2,2,0,np.max(patch),np.mean(patch)), 
+                gauss_residual_fn(x[valid],y[valid],patch_valid), 
+                (x_max,y_max,2,2,0,patch_max,np.mean(patch_valid)), 
                 method='Powell'
             )
 

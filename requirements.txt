@@ -3,4 +3,5 @@ scipy
 rawpy
 fitsio
 matplotlib
-PIL
+pillow
+tqdm

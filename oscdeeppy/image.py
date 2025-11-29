@@ -35,10 +35,11 @@ class FITSSet:
     Images are loaded on the fly, so this is safe across multiprocessing, etc.
     '''
     
-    def __init__(self, files):
+    def __init__(self, files, transpose=None):
         self.files = files
         self.num_img = len(files)
-        test = fitsio.read(files[0])
+        self.transpose = transpose
+        test = self[0]
         self.img_shape = test.shape
         self.dtype = test.dtype
     
@@ -47,7 +48,8 @@ class FITSSet:
     
     def __getitem__(self, i):
         assert type(i) == int, 'Must assign to integer values only'
-        return fitsio.read(self.files[i]) 
+        data = fitsio.read(self.files[i]) 
+        return data if self.transpose is None else data.transpose(self.transpose)
         
     def lazy_read(self, i):
         return IndirectImg(self,i)
@@ -184,13 +186,13 @@ class ImageProcessor:
         self.buffer = nproc//2
         self.pool = futures.ProcessPoolExecutor(max_workers=nproc)
 
-    def map(self, func, input_set, *iter_args, args=[], selection=None, output_set=None, reduce=None, verbose=False, **kwargs):
+    def map(self, func, input_set, *iter_args, args=[], selection=None, output_set=None, reduce=None, progress=False, **kwargs):
         if output_set is None:
             if reduce is None:
                 results = [None]*len(input_set)
             else:
                 results = None
-        if verbose:
+        if progress:
             total_jobs = len(input_set) if selection is None else np.count_nonzero(selection)
             pbar = tqdm(total=total_jobs)
         fs = set()
@@ -200,18 +202,12 @@ class ImageProcessor:
             if selection is None or selection[i]:
                 in_img = input_set.lazy_read(i)
                 out_img = output_set.lazy_write(j) if output_set is not None else None
-                if verbose:
-                    pass
-                    #print(f'Starting {i}->{j}')
                 f = self.pool.submit(_iproc_worker, func, j, in_img, out_img, next(args_it) if args_it else [], args, kwargs)
                 fs.add(f)
-                j = j + 1
             else:
-                if verbose:
-                    pass
-                    #print(f'Skipping {i}')
                 if args_it:
                     next(args_it)
+            j = j + 1
             all_queued = i+1 == len(input_set)
             buffer_full = len(fs) >= self.nproc+self.buffer
             if buffer_full or all_queued:
@@ -221,9 +217,7 @@ class ImageProcessor:
                     done,fs = futures.wait(fs,return_when=futures.FIRST_COMPLETED)
                 for f_done in done:
                     j_done, res_done = f_done.result()
-                    if verbose:
-                        pbar.update(1)
-                        #print(f'Finished {j_done}')
+                    if progress: pbar.update(1)
                     if reduce is None:
                         if output_set is None:
                             results[j_done] = res_done
@@ -232,8 +226,7 @@ class ImageProcessor:
                             results = res_done
                         else:
                             results = reduce(results,res_done)
-        if verbose:
-            pbar.close()
+        if progress: pbar.close()
         if output_set is None:
             return results
 
