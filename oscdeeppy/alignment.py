@@ -76,10 +76,10 @@ def gauss_residual_fn(X,Y,Z):
         Z_fit = gauss_profile(X,Y,*x)
         return np.sum(np.square(Z-Z_fit))
     return fn
-
+    
 def find_stars(img, registration_channel=1, num_stars=250, patch_radius=10, verbose=False, 
-               snr_min=10, max_peak_dist=2, min_fwhm=2, max_eccentricity=0.85, clip_cut=None,
-               max_attempts=2000):
+               snr_min=5, max_peak_dist=2, min_fwhm=2, max_eccentricity=0.85, clip_cut=None,
+               max_attempts=2000, make_psf=False, fast_fit=False):
     '''
     Identify stars by looking for relatively isolated bright peaks and fitting 2d gaussian profiles.
     Handles multi-channel images by extracting one channel, working natively on a grayscale image/
@@ -92,28 +92,33 @@ def find_stars(img, registration_channel=1, num_stars=250, patch_radius=10, verb
     std = np.std(reg_ch)
     ch_max = np.max(reg_ch)
 
-    reg_mask = np.zeros_like(reg_ch)
-    shift = reg_ch-mean
-    reg_mask[reg_ch > mean+std*3] = 1
+    reg_search = np.zeros_like(reg_ch)
+    reg_search[reg_ch > mean+std*3] = 1
 
-    reg_blur = reg_mask
     for stage in range(2):
-        reg_blur = gaussian_filter(reg_blur, sigma=3)
-        
-    reg_search = reg_blur.copy()
+        reg_search = gaussian_filter(reg_search, sigma=3)
 
     attempts = 0
     candidate_stars = []
+    
+    y = np.arange(-patch_radius,patch_radius+1)
+    x = np.arange(-patch_radius,patch_radius+1)
+    x,y = np.meshgrid(x,y)
 
+    if make_psf:
+        psf_size = 2*patch_radius+1
+        psf = np.zeros((psf_size,psf_size),dtype=DTYPE)
+        psf_norm = np.zeros((psf_size,psf_size),dtype=DTYPE)
+    
+    idxes = np.argsort(-reg_search.ravel()).tolist()
     i = 0
-    while i < num_stars:
-        idx = np.argmax(reg_search)
+    while len(candidate_stars) < num_stars and i < len(idxes) and attempts < max_attempts:
+        idx = idxes[i]
+        i +=1
         x_max = idx%reg_search.shape[1]
         y_max = idx//reg_search.shape[1]
-        if attempts >= max_attempts or reg_search[y_max,x_max] <= 0.0:
-            print(f'Only {i} of {num_stars} requested stars from {attempts} attempts')
-            break
-        #print(x_max,y_max,reg_search[y_max,x_max])
+        if reg_search[y_max][x_max] == 0: 
+            continue;
 
         if x_max - patch_radius >= 0 and x_max + patch_radius < reg_search.shape[1] and y_max - patch_radius >= 0 and y_max + patch_radius < reg_search.shape[0]:
             reg_search[
@@ -123,37 +128,47 @@ def find_stars(img, registration_channel=1, num_stars=250, patch_radius=10, verb
 
             patch = reg_ch[(y_max-patch_radius):(y_max+patch_radius+1),(x_max-patch_radius):(x_max+patch_radius+1)]
             valid = np.logical_and(~np.isnan(patch), patch > 0)
+            if np.count_nonzero(valid) == 0: continue
             patch_valid = patch[valid]
             patch_max = np.max(patch_valid)
-            if patch_max/np.min(patch_valid) < snr_min:
-                continue # skip candidate as SNR too low to make the cut
-            if clip_cut and patch_max > ch_max*clip_cut:
-                continue # skip because there's clipping
-                
-            y = np.arange(y_max-patch_radius,y_max+patch_radius+1)
-            x = np.arange(x_max-patch_radius,x_max+patch_radius+1)
-            x,y = np.meshgrid(x,y)
-            
-            # fit the star profile
-            fit = minimize(
-                gauss_residual_fn(x[valid],y[valid],patch_valid), 
-                (x_max,y_max,2,2,0,patch_max,np.mean(patch_valid)), 
-                method='Powell'
-            )
 
             attempts += 1
+            
+            if patch_max/np.min(patch_valid) < snr_min:
+                if verbose: print(f'Skipping candidate {attempts} for SNR')
+                continue
+            if clip_cut and patch_max > ch_max*clip_cut:
+                if verbose: print(f'Skipping candidate {attempts} for clipping')
+                continue
+                
 
-            mean_x, mean_y, sig_x, sig_y, theta, star_lvl, bkg_lvl = fit.x
-            sig_x,sig_y = abs(sig_x),abs(sig_y)
-            fwhm = np.sqrt(2*np.log(2))*(sig_x+sig_y)
-            eccentricity = np.sqrt(1.0-np.square(min(sig_x,sig_y)/max(sig_x,sig_y)))
-            dist = np.sqrt((x_max-mean_x)**2.0+(y_max-mean_y)**2.0)
+            if fast_fit:
+                # guess the star parameters 
+                fit_success = True
+            else:
+                # fit the star profile
+                fit = minimize(
+                    gauss_residual_fn(x[valid],y[valid],patch_valid), 
+                    (0,0,2,2,0,patch_max,np.median(patch_valid)), 
+                    method='Powell'
+                )
+    
+                mean_x, mean_y, sig_x, sig_y, theta, star_lvl, bkg_lvl = fit.x
+                dist = np.sqrt(mean_x**2.0+mean_y**2.0)
+                sig_x,sig_y = abs(sig_x),abs(sig_y)
+                fwhm = np.sqrt(2*np.log(2))*(sig_x+sig_y)
+                eccentricity = np.sqrt(1.0-np.square(min(sig_x,sig_y)/max(sig_x,sig_y)))
+                
+                mean_x += x_max
+                mean_y += y_max
 
-            if verbose:
-                print(f'Fit({fit.nfev}): {fit.message}')
-                print(f'FWHM {fwhm} ECC {eccentricity} SNR {abs(star_lvl/bkg_lvl)} LVL {star_lvl} DIST {dist}')
+                fit_success = fit.success
+                
+                if verbose: print(f'Fit({fit.nfev}): {fit.message}')
+                    
+            if verbose: print(f'FWHM {fwhm} ECC {eccentricity} SNR {abs(star_lvl/bkg_lvl)} LVL {star_lvl} DIST {dist}')
 
-            if (fit.success and 
+            if (fit_success and 
                 dist < max_peak_dist and 
                 fwhm > min_fwhm and 
                 eccentricity < max_eccentricity and 
@@ -163,8 +178,13 @@ def find_stars(img, registration_channel=1, num_stars=250, patch_radius=10, verb
                ):
                 
                 candidate_stars.append([mean_x, mean_y, fwhm, star_lvl, bkg_lvl, eccentricity])
-                i += 1
-    
+
+                if make_psf:
+                    star_profile = np.clip(patch_valid - bkg_lvl,0,None)
+                    star_profile /= np.sum(star_profile)
+                    psf[valid] += star_profile
+                    psf_norm[valid] += 1
+                
                 if verbose:
                     plt.subplot(1,2,1)
                     plt.imshow(patch)
@@ -175,15 +195,20 @@ def find_stars(img, registration_channel=1, num_stars=250, patch_radius=10, verb
                     plt.show()
                     plt.close()
             else:
-                if verbose:
-                    print(f'Candidate {attempts} Excluded')
+                if verbose: print(f'Candidate {attempts} Excluded')
         else: #hit an edge
             reg_search[
                 max(y_max-patch_radius,0):min(y_max+patch_radius+1,reg_search.shape[0]),
                 max(x_max-patch_radius,0):min(x_max+patch_radius+1,reg_search.shape[1])
             ] = 0
-
-    return np.asarray(candidate_stars)
+    if len(candidate_stars) < num_stars and verbose:
+        print(f'Only {len(candidate_stars)} of {num_stars} requested stars from {attempts} attempts')
+    if make_psf:
+        psf /= psf_norm
+        psf /= np.sum(psf)
+        return psf
+    else:
+        return np.asarray(candidate_stars)
 
 def build_constellations(stars, k_nearest=7, **kwargs):
     pts = stars[:,:2]
